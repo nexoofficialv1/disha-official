@@ -1,0 +1,110 @@
+name: Build DISHA APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-apk:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Show repository files
+        run: |
+          echo "Repository root:"
+          pwd
+          ls -la
+          echo "Looking for pubspec.yaml..."
+          find . -name pubspec.yaml -not -path "*/.dart_tool/*" -print || true
+          echo "Looking for DISHA zip..."
+          find . -name "*.zip" -print || true
+
+      - name: Extract DISHA package if needed
+        shell: bash
+        run: |
+          if find . -name pubspec.yaml -not -path "*/.dart_tool/*" | grep -q .; then
+            echo "Flutter project already exists."
+            exit 0
+          fi
+
+          ZIP_PATH=$(find . -maxdepth 2 -name "*.zip" | head -n 1)
+
+          if [ -z "$ZIP_PATH" ]; then
+            echo "ERROR: No pubspec.yaml and no ZIP file found."
+            echo "Upload disha_v1_github_root_fixed.zip to repo root."
+            exit 1
+          fi
+
+          echo "Extracting: $ZIP_PATH"
+          mkdir -p extracted
+          unzip -o "$ZIP_PATH" -d extracted
+
+          echo "After extraction:"
+          find extracted -name pubspec.yaml -not -path "*/.dart_tool/*" -print
+
+      - name: Find Flutter app directory
+        shell: bash
+        run: |
+          PUBSPEC_PATH=$(find . -name pubspec.yaml -not -path "*/.dart_tool/*" | head -n 1)
+
+          if [ -z "$PUBSPEC_PATH" ]; then
+            echo "ERROR: pubspec.yaml still not found after extraction."
+            exit 1
+          fi
+
+          APP_DIR=$(dirname "$PUBSPEC_PATH")
+          echo "APP_DIR=$APP_DIR" >> "$GITHUB_ENV"
+          echo "Flutter app directory: $APP_DIR"
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.24.5"
+          channel: stable
+
+      - name: Flutter doctor
+        run: flutter doctor -v
+
+      - name: Ensure Android platform exists
+        shell: bash
+        run: |
+          cd "$APP_DIR"
+          if [ ! -d "android" ]; then
+            flutter create . --platforms=android
+          fi
+
+      - name: Install Flutter dependencies
+        shell: bash
+        run: |
+          cd "$APP_DIR"
+          flutter pub get
+
+      - name: Analyze Flutter code
+        shell: bash
+        run: |
+          cd "$APP_DIR"
+          flutter analyze
+
+      - name: Build debug APK
+        shell: bash
+        run: |
+          cd "$APP_DIR"
+          flutter build apk --debug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: DISHA-v1-debug-apk
+          path: ${{ env.APP_DIR }}/build/app/outputs/flutter-apk/app-debug.apk
